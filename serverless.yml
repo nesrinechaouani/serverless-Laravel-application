@@ -1,0 +1,84 @@
+service: laravel
+
+provider:
+    name: aws
+    region: eu-north-1
+    environment:
+        APP_ENV: production
+        SESSION_DRIVER: cookie
+        COGNITO_USER_POOL_ID: ${self:custom.cognitoUserPoolId}
+        COGNITO_CLIENT_ID: ${self:custom.cognitoClientId}
+        COGNITO_REGION: ${self:provider.region}
+
+package:
+    patterns:
+        - '!node_modules/**'
+        - '!public/storage'
+        - '!resources/assets/**'
+        - '!resources/css/**'
+        - '!resources/images/**'
+        - '!resources/js/**'
+        - '!storage/**'
+        - '!tests/**'
+        - '!database/*.sqlite'
+
+functions:
+    web:
+        handler: public/index.php
+        runtime: php-82-fpm
+        timeout: 28
+        events:
+            - httpApi:
+                  method: ANY
+                  path: /{proxy+}
+                  authorizer:
+                      name: CognitoAuthorizer
+                      scopes:
+                          - email
+                      identitySource: $request.header.Authorization
+                      type: COGNITO_USER_POOLS
+                      providerARNs:
+                          - Fn::GetAtt: [CognitoUserPool, Arn]
+
+    artisan:
+        handler: artisan
+        runtime: php-82-console
+        timeout: 720
+
+plugins:
+    - ./vendor/bref/bref
+
+resources:
+    Resources:
+        CognitoUserPool:
+            Type: AWS::Cognito::UserPool
+            Properties:
+                UserPoolName: ${self:service}-user-pool
+                AutoVerifiedAttributes:
+                    - email
+                Policies:
+                    PasswordPolicy:
+                        MinimumLength: 8
+                        RequireLowercase: true
+                        RequireNumbers: true
+                        RequireSymbols: true
+                        RequireUppercase: true
+                Schema:
+                    - Name: email
+                      AttributeDataType: String
+                      Required: true
+                      Mutable: true
+
+        CognitoUserPoolClient:
+            Type: AWS::Cognito::UserPoolClient
+            Properties:
+                ClientName: ${self:service}-client
+                UserPoolId: !Ref CognitoUserPool
+                GenerateSecret: false
+                ExplicitAuthFlows:
+                    - ALLOW_USER_PASSWORD_AUTH
+                    - ALLOW_REFRESH_TOKEN_AUTH
+
+custom:
+    cognitoUserPoolId: !Ref CognitoUserPool
+    cognitoClientId: !Ref CognitoUserPoolClient
